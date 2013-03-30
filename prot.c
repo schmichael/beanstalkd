@@ -24,12 +24,15 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
     "0123456789-+/;.$_()"
 
 #define CMD_PUT "put "
+#define CMD_PUT_TUBE "put-in-tube "
 #define CMD_PEEKJOB "peek "
 #define CMD_PEEK_READY "peek-ready"
 #define CMD_PEEK_DELAYED "peek-delayed"
 #define CMD_PEEK_BURIED "peek-buried"
 #define CMD_RESERVE "reserve"
 #define CMD_RESERVE_TIMEOUT "reserve-with-timeout "
+#define CMD_RESERVE_TUBES "reserve-tubes "
+#define CMD_RESERVE_TUBES_TIMEOUT "reserve-tubes-with-timeout "
 #define CMD_DELETE "delete "
 #define CMD_RELEASE "release "
 #define CMD_BURY "bury "
@@ -72,6 +75,9 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
 #define CMD_LIST_TUBES_WATCHED_LEN CONSTSTRLEN(CMD_LIST_TUBES_WATCHED)
 #define CMD_STATS_TUBE_LEN CONSTSTRLEN(CMD_STATS_TUBE)
 #define CMD_PAUSE_TUBE_LEN CONSTSTRLEN(CMD_PAUSE_TUBE)
+#define CMD_PUT_TUBE_LEN CONSTSTRLEN(CMD_PUT_TUBE)
+#define CMD_RESERVE_TUBES_LEN CONSTSTRLEN(CMD_RESERVE_TUBES)
+#define CMD_RESERVE_TUBES_TIMEOUT_LEN CONSTSTRLEN(CMD_RESERVE_TUBES_TIMEOUT_LEN)
 
 #define MSG_FOUND "FOUND"
 #define MSG_NOTFOUND "NOT_FOUND\r\n"
@@ -136,7 +142,10 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
 #define OP_QUIT 22
 #define OP_PAUSE_TUBE 23
 #define OP_JOBKICK 24
-#define TOTAL_OPS 25
+#define OP_PUT_TUBE 25
+#define OP_RESERVE_TUBES 26
+#define OP_RESERVE_TUBES_TIMEOUT 27
+#define TOTAL_OPS 27
 
 #define STATS_FMT "---\n" \
     "current-jobs-urgent: %u\n" \
@@ -145,12 +154,15 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
     "current-jobs-delayed: %u\n" \
     "current-jobs-buried: %u\n" \
     "cmd-put: %" PRIu64 "\n" \
+    "cmd-put-tube: %" PRIu64 "\n" \
     "cmd-peek: %" PRIu64 "\n" \
     "cmd-peek-ready: %" PRIu64 "\n" \
     "cmd-peek-delayed: %" PRIu64 "\n" \
     "cmd-peek-buried: %" PRIu64 "\n" \
     "cmd-reserve: %" PRIu64 "\n" \
+    "cmd-reserve-tubes: %" PRIu64 "\n" \
     "cmd-reserve-with-timeout: %" PRIu64 "\n" \
+    "cmd-reserve-tubes-with-timeout: %" PRIu64 "\n" \
     "cmd-delete: %" PRIu64 "\n" \
     "cmd-release: %" PRIu64 "\n" \
     "cmd-use: %" PRIu64 "\n" \
@@ -273,6 +285,9 @@ static const char * op_names[] = {
     CMD_QUIT,
     CMD_PAUSE_TUBE,
     CMD_JOBKICK,
+    CMD_PUT_TUBE,
+    CMD_RESERVE_TUBES,
+    CMD_RESERVE_TUBES_TIMEOUT,
 };
 
 static job remove_buried_job(job j);
@@ -739,6 +754,7 @@ which_cmd(Conn *c)
 {
 #define TEST_CMD(s,c,o) if (strncmp((s), (c), CONSTSTRLEN(c)) == 0) return (o);
     TEST_CMD(c->cmd, CMD_PUT, OP_PUT);
+    TEST_CMD(c->cmd, CMD_PUT_TUBE, OP_PUT_TUBE);
     TEST_CMD(c->cmd, CMD_PEEKJOB, OP_PEEKJOB);
     TEST_CMD(c->cmd, CMD_PEEK_READY, OP_PEEK_READY);
     TEST_CMD(c->cmd, CMD_PEEK_DELAYED, OP_PEEK_DELAYED);
@@ -890,12 +906,15 @@ fmt_stats(char *buf, size_t size, void *x)
             get_delayed_job_ct(),
             global_stat.buried_ct,
             op_ct[OP_PUT],
+            op_ct[OP_PUT_TUBE],
             op_ct[OP_PEEKJOB],
             op_ct[OP_PEEK_READY],
             op_ct[OP_PEEK_DELAYED],
             op_ct[OP_PEEK_BURIED],
             op_ct[OP_RESERVE],
+            op_ct[OP_RESERVE_TUBES],
             op_ct[OP_RESERVE_TIMEOUT],
+            op_ct[OP_RESERVE_TUBES_TIMEOUT],
             op_ct[OP_DELETE],
             op_ct[OP_RELEASE],
             op_ct[OP_USE],
@@ -992,7 +1011,9 @@ read_tube_name(char **tubename, char *buf, char **end)
     size_t len;
 
     while (buf[0] == ' ') buf++;
+    printf("buf: %s\n", buf);
     len = strspn(buf, NAME_CHARS);
+    printf("sz: %d\n", len);
     if (len == 0) return -1;
     if (tubename) *tubename = buf;
     if (end) *end = buf + len;
@@ -1207,6 +1228,60 @@ dispatch_cmd(Conn *c)
     }
 
     switch (type) {
+    case OP_PUT_TUBE:
+        op_ct[type]++;
+
+        r = read_tube_name(&name, c->cmd + CMD_PUT_TUBE_LEN, &pri_buf);
+        if (r) return reply_msg(c, MSG_BAD_FORMAT);
+
+        r = read_pri(&pri, pri_buf, &delay_buf);
+        if (r) return reply_msg(c, MSG_BAD_FORMAT);
+
+        *pri_buf = '\0';
+        printf("name: %s\n", name);
+
+        r = read_delay(&delay, delay_buf, &ttr_buf);
+        if (r) return reply_msg(c, MSG_BAD_FORMAT);
+
+        r = read_ttr(&ttr, ttr_buf, &size_buf);
+        if (r) return reply_msg(c, MSG_BAD_FORMAT);
+
+        errno = 0;
+        body_size = strtoul(size_buf, &end_buf, 10);
+        if (errno) return reply_msg(c, MSG_BAD_FORMAT);
+
+        if (body_size > job_data_size_limit) {
+            /* throw away the job body and respond with JOB_TOO_BIG */
+            return skip(c, body_size + 2, MSG_JOB_TOO_BIG);
+        }
+
+        /* don't allow trailing garbage */
+        if (end_buf[0] != '\0') return reply_msg(c, MSG_BAD_FORMAT);
+
+        connsetproducer(c);
+
+        if (ttr < 1000000000) {
+            ttr = 1000000000;
+        }
+
+        t = tube_find_or_make(name);
+        if (!t) return reply_msg(c, MSG_NOTFOUND);
+
+        c->in_job = make_job(pri, delay, ttr, body_size + 2, t);
+
+        /* OOM? */
+        if (!c->in_job) {
+            /* throw away the job body and respond with OUT_OF_MEMORY */
+            twarnx("server error: " MSG_OUT_OF_MEMORY);
+            return skip(c, body_size + 2, MSG_OUT_OF_MEMORY);
+        }
+
+        fill_extra_data(c);
+
+        /* it's possible we already have a complete job */
+        maybe_enqueue_incoming_job(c);
+
+        break;
     case OP_PUT:
         r = read_pri(&pri, c->cmd + 4, &delay_buf);
         if (r) return reply_msg(c, MSG_BAD_FORMAT);
