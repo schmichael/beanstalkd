@@ -24,7 +24,7 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
     "0123456789-+/;.$_()"
 
 #define CMD_PUT "put "
-#define CMD_PUT_TUBE "put-in-tube "
+#define CMD_PUT_TUBE "put-using-tube "
 #define CMD_PEEKJOB "peek "
 #define CMD_PEEK_READY "peek-ready"
 #define CMD_PEEK_DELAYED "peek-delayed"
@@ -154,7 +154,7 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
     "current-jobs-delayed: %u\n" \
     "current-jobs-buried: %u\n" \
     "cmd-put: %" PRIu64 "\n" \
-    "cmd-put-tube: %" PRIu64 "\n" \
+    "cmd-put-using-tube: %" PRIu64 "\n" \
     "cmd-peek: %" PRIu64 "\n" \
     "cmd-peek-ready: %" PRIu64 "\n" \
     "cmd-peek-delayed: %" PRIu64 "\n" \
