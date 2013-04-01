@@ -1238,7 +1238,6 @@ dispatch_cmd(Conn *c)
         if (r) return reply_msg(c, MSG_BAD_FORMAT);
 
         *pri_buf = '\0';
-        printf("name: %s\n", name);
 
         r = read_delay(&delay, delay_buf, &ttr_buf);
         if (r) return reply_msg(c, MSG_BAD_FORMAT);
