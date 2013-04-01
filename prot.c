@@ -31,8 +31,8 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
 #define CMD_PEEK_BURIED "peek-buried"
 #define CMD_RESERVE "reserve"
 #define CMD_RESERVE_TIMEOUT "reserve-with-timeout "
-#define CMD_RESERVE_TUBES "reserve-tubes "
-#define CMD_RESERVE_TUBES_TIMEOUT "reserve-tubes-with-timeout "
+#define CMD_RESERVE_TUBES "watch-and-reserve "
+#define CMD_RESERVE_TUBES_TIMEOUT "watch-and-reserve-with-timeout "
 #define CMD_DELETE "delete "
 #define CMD_RELEASE "release "
 #define CMD_BURY "bury "
@@ -1394,6 +1394,37 @@ dispatch_cmd(Conn *c)
             return reply_msg(c, MSG_BAD_FORMAT);
         }
 
+        op_ct[type]++;
+        connsetworker(c);
+
+        if (conndeadlinesoon(c) && !conn_ready(c)) {
+            return reply_msg(c, MSG_DEADLINE_SOON);
+        }
+
+        /* try to get a new job for this guy */
+        wait_for_job(c, timeout);
+        process_queue();
+        break;
+    case OP_RESERVE_TUBES_TIMEOUT:
+        errno = 0;
+        timeout = strtol(c->cmd + CMD_RESERVE_TIMEOUT_LEN, &end_buf, 10);
+        if (errno) return reply_msg(c, MSG_BAD_FORMAT);
+    case OP_RESERVE_TUBES: /* FALLTHROUGH */
+        while (1) {
+            r = read_tube_name(&name, end_buf, &end_buf);
+            if (r) return reply_msg(c, MSG_BAD_FORMAT);
+
+            TUBE_ASSIGN(t, tube_find_or_make(name));
+            if (!t) return reply_serr(c, MSG_OUT_OF_MEMORY);
+
+            r = 1;
+            if (!ms_contains(&c->watch, t)) r = ms_append(&c->watch, t);
+            TUBE_ASSIGN(t, NULL);
+            if (!r) return reply_serr(c, MSG_OUT_OF_MEMORY);
+
+            //TODO If end-of-line break
+            //TODO Else if next char == ',', continue
+        }
         op_ct[type]++;
         connsetworker(c);
 
