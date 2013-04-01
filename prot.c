@@ -1229,8 +1229,6 @@ dispatch_cmd(Conn *c)
 
     switch (type) {
     case OP_PUT_TUBE:
-        op_ct[type]++;
-
         r = read_tube_name(&name, c->cmd + CMD_PUT_TUBE_LEN, &pri_buf);
         if (r) return reply_msg(c, MSG_BAD_FORMAT);
 
@@ -1248,6 +1246,8 @@ dispatch_cmd(Conn *c)
         errno = 0;
         body_size = strtoul(size_buf, &end_buf, 10);
         if (errno) return reply_msg(c, MSG_BAD_FORMAT);
+
+        op_ct[type]++;
 
         if (body_size > job_data_size_limit) {
             /* throw away the job body and respond with JOB_TOO_BIG */
