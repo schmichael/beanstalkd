@@ -145,7 +145,7 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
 #define OP_PUT_TUBE 25
 #define OP_RESERVE_TUBES 26
 #define OP_RESERVE_TUBES_TIMEOUT 27
-#define TOTAL_OPS 27
+#define TOTAL_OPS 28
 
 #define STATS_FMT "---\n" \
     "current-jobs-urgent: %u\n" \
